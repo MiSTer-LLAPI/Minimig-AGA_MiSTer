@@ -1,0 +1,81 @@
+name: Publish accepted Amiga variants
+on:
+  push:
+    branches: [llapi-snac-experimental]
+    paths: [.github/workflows/amiga-publish-accepted.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: amiga-publish-accepted-40863913506
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: f48ad51a2305130e01aff89804ac248eeb43eeae
+          persist-credentials: false
+      - name: Wait for existing compilation without rebuilding accepted variants
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run watch 40863913506 --repo "$GITHUB_REPOSITORY" --interval 60 --exit-status || true
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/40863913506" > /tmp/run.json
+          python3 -c "import json; assert json.load(open('/tmp/run.json'))['status']=='completed'"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/40863913506/jobs?per_page=100" > /tmp/jobs.json
+          gh run download 40863913506 --repo "$GITHUB_REPOSITORY" --pattern 'Amiga-*' --dir artifacts
+      - name: Package and publish only successful variants
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import json,hashlib,shutil
+          from pathlib import Path
+          root=Path('artifacts'); out=Path('release');out.mkdir()
+          source='f48ad51a2305130e01aff89804ac248eeb43eeae'
+          variants=['Original-USER','LLAPI-2P','SNAC-DB15-2P','SNAC-SNES-2P','SNAC-DB9-1P','SNAC-NES-2P','SNAC-SATURN-1P']
+          jobs=json.loads(Path('/tmp/jobs.json').read_text())['jobs']
+          assert next(j for j in jobs if j['name']=='controllers')['conclusion']=='success'
+          assert all(j['status']=='completed' for j in jobs)
+          available=[];deferred=[];timings={}
+          for variant in variants:
+              matches=[j for j in jobs if j['name'].startswith('build (') and j['name'].endswith(', '+variant+')')]
+              assert len(matches)==1
+              job=matches[0]
+              if job['conclusion']!='success':
+                  deferred.append(variant+' — build or timing checks did not pass')
+                  continue
+              paths=list(root.glob('Amiga-'+variant+'-*/test-build/Amiga_'+variant+'_20261029_experimental.rbf'))
+              assert len(paths)==1, 'Missing or duplicate accepted RBF: '+variant
+              f=paths[0]; info=(f.parent/'SOURCE.txt').read_text()
+              assert 'Source: '+source in info
+              report=json.loads((f.parent/'timing-acceptance.json').read_text())
+              required={'setup','hold','recovery','removal','minimum pulse width'}
+              assert report['accepted'] and required.issubset(report['worst_slack_ns'])
+              assert all(v>=0 for v in report['worst_slack_ns'].values())
+              shutil.copy2(f,out/f.name)
+              available.append(variant);timings[variant]=report
+          assert available, 'No accepted variants to publish'
+          summary='# Amiga LLAPI / SNAC — experimental subset\n\nOnly the variants listed below are included in this release. Each passed compilation, controller regression tests and all required timing checks. Failed variants are deferred to a later revision and are not included in the download. No Kickstart or game data is supplied. **Physical hardware validation of these new Amiga builds is pending.** The official MiSTer Main is retained.\n\n## Available RBFs\n\n'
+          summary+=''.join('- '+v+'\n' for v in available)
+          summary+='\n## Deferred variants\n\n'+(''.join('- '+v+'\n' for v in deferred) if deferred else 'None.\n')
+          summary+='\nIf Original-USER is deferred, use the official Amiga core for physical floppy / MT32-pi. Controller variants dedicate USER to their named protocol; no new selector is added to stock Main.\n'
+          summary+='\nCompiled source: https://github.com/MiSTer-LLAPI/Minimig-AGA_MiSTer/commit/'+source+'\nBuild: https://github.com/MiSTer-LLAPI/Minimig-AGA_MiSTer/actions/runs/40863913506\n\n'
+          Path('Release-notes.md').write_text(summary+Path('CONTROLLERS-EXPERIMENTAL.md').read_text().replace('publishes a pre-release only if every variant passes', 'publishes only variants that pass; failed variants are deferred'))
+          (out/'AVAILABLE-BUILDS.md').write_text(summary)
+          (out/'CONTROLLERS-EXPERIMENTAL.md').write_text(summary+Path('CONTROLLERS-EXPERIMENTAL.md').read_text().replace('publishes a pre-release only if every variant passes', 'publishes only variants that pass; failed variants are deferred'))
+          (out/'timing-acceptance.json').write_text(json.dumps(timings,indent=2)+'\n')
+          (out/'SOURCE.txt').write_text('Compiled source: '+source+'\nUpstream: bf5d061b414fa0c8cd56f0e6941c586202ebfbaa\n')
+          (out/'SHA256SUMS').write_text(''.join(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name+'\n' for f in sorted(out.iterdir()) if f.is_file() and f.name!='SHA256SUMS'))
+          print(summary)
+          PYCODE
+          (cd release && zip -q ../Amiga-LLAPI-SNAC-accepted-experimental.zip *)
+          gh release create amiga-llapi-snac-20261029-accepted --repo "$GITHUB_REPOSITORY" --target f48ad51a2305130e01aff89804ac248eeb43eeae --prerelease --title 'Amiga LLAPI / SNAC — accepted experimental variants' --notes-file Release-notes.md Amiga-LLAPI-SNAC-accepted-experimental.zip release/*.rbf release/SHA256SUMS release/AVAILABLE-BUILDS.md release/timing-acceptance.json release/SOURCE.txt
