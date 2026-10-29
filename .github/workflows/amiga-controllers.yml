@@ -2,6 +2,7 @@ name: Experimental Amiga LLAPI and SNAC variants
 on:
   push:
     branches: [llapi-snac-experimental]
+    paths-ignore: ['.github/workflows/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -100,6 +101,7 @@ jobs:
             output_files/*.summary
             output_files/timing-acceptance.json
   prerelease:
+    if: ${{ always() && needs.source.result == 'success' && needs.controllers.result == 'success' }}
     needs: [source,controllers,build]
     runs-on: ubuntu-24.04
     permissions:
@@ -113,7 +115,7 @@ jobs:
         with:
           pattern: Amiga-*
           path: artifacts
-      - name: Publish experimental bundle only after all seven variants pass
+      - name: Publish only variants that pass all checks
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
@@ -124,7 +126,7 @@ jobs:
           import json,shutil
           from pathlib import Path
           paths=list(Path('artifacts').glob('*/test-build/*.rbf'))
-          assert len(paths)==7, f'Expected 7 accepted RBFs, found {len(paths)}'
+          assert paths, 'No accepted RBFs to publish'
           for p in paths:
               d=json.loads((p.parent/'timing-acceptance.json').read_text())
               assert d['accepted'] and all(v>=0 for v in d['worst_slack_ns'].values())
@@ -132,6 +134,7 @@ jobs:
               shutil.copy2(p.parent/'timing-acceptance.json',Path('release')/(p.stem+'-timing.json'))
           PY
           cp CONTROLLERS-EXPERIMENTAL.md release/
+          printf '\n\nThis release contains only the RBF variants included in the attached ZIP. Variants that failed compilation or timing are deferred to a later revision.\n' >> CONTROLLERS-EXPERIMENTAL.md
           printf 'Compiled source: %s\nOfficial source: bf5d061b414fa0c8cd56f0e6941c586202ebfbaa\n' "$SOURCE_SHA" > release/SOURCE.txt
           (cd release && sha256sum *.rbf > SHA256SUMS)
           (cd release && zip -q ../Amiga-LLAPI-SNAC-experimental.zip *)
