@@ -308,6 +308,7 @@ module minimig
 	input         ide_read,
 	output [15:0] ide_readdata,
 	
+	input         user_controllers,
 	input   [6:0] USER_IN,
 	output  [6:0] USER_OUT,
 	output  user_port_mode,
@@ -631,7 +632,7 @@ paula PAULA1
 	.floppy_speed_allowed(floppy_config[0]),
 	.floppy_speed(floppy_speed),
 	
-	.enable_mister_floppy(user_port_mode),	
+	.enable_mister_floppy(user_port_mode && !user_controllers),	
 	.mister_floppy_status(mister_floppy_status),
 	.drive_snd(drive_snd),
 

@@ -1,3 +1,11 @@
+# MiSTer-LLAPI experimental Amiga controller variants
+
+Six fixed controller variants retain the official MiSTer Main: LLAPI 2P, original Jotego SNAC DB15 2P, SNAC SNES 2P, Mega Drive DB9 1P, SNAC NES 2P and Saturn digital 1P. A separate Original-USER RBF preserves floppy and MT32-pi.
+
+[Instructions, mappings, wiring and validation limits](CONTROLLERS-EXPERIMENTAL.md). These builds are experimental and require hardware testing. Based on official commit `bf5d061b414fa0c8cd56f0e6941c586202ebfbaa` (2026-10-28). Original project history, credits and licenses are preserved below.
+
+---
+
 # Minimig-AGA_MiSTer
 
 This is a port of the minimig core to the [MiSTer board](https://github.com/MiSTer-devel).

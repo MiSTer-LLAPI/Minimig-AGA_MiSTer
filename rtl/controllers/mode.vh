@@ -1,0 +1,3 @@
+`ifndef AMIGA_SERIAL_MODE
+`define AMIGA_SERIAL_MODE 1
+`endif

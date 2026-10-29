@@ -102,3 +102,10 @@ if {[string equal "quartus_fit" $::TimeQuestInfo(nameofexecutable)]} {
 	set_clock_uncertainty -add -setup -from [get_clocks {emu|pll|pll_inst|altera_pll_i|cyclonev_pll|counter[1].output_counter|divclk}] -to [get_clocks {emu|pll|pll_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk}] 0.4
 	set_clock_uncertainty -add -setup -from [get_clocks {pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk}] -to [get_clocks {pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk}] 0.1
 }
+
+# Controller levels cross into clk_sys through two sampling stages.
+# Preserve timing from each *_meta stage to its *_sync destination.
+set_false_path -to {*controller_user_port*inputs*p1_meta[*]}
+set_false_path -to {*controller_user_port*inputs*p2_meta[*]}
+set_false_path -to {*controller_user_port*inputs*flags_meta[*]}
+set_false_path -to {*controller_user_port*inputs*llapi*osd_meta}

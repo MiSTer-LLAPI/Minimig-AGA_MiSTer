@@ -1,3 +1,4 @@
+`include "rtl/controllers/mode.vh"
 /********************************************/
 /* minimig.sv                               */
 /* MiSTer glue logic                        */
@@ -11,7 +12,7 @@ module emu
 
 assign ADC_BUS  = 'Z;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
-assign BUTTONS = 0;
+assign BUTTONS = {1'b0,serial_osd};
 assign VGA_DISABLE = 0;
 assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
@@ -802,7 +803,21 @@ wire  [8:0] drive_snd;
 wire [6:0]  IndirectUserOutmt32;
 wire [6:0]  IndirectUserOutFlop;
 wire        user_port_mode;
-assign USER_OUT = user_port_mode ? IndirectUserOutFlop : IndirectUserOutmt32;
+localparam SERIAL_MODE=`AMIGA_SERIAL_MODE;
+wire [15:0] SERIAL_JOY0,SERIAL_JOY1;
+wire [6:0] serial_out;
+wire serial_osd;
+wire [6:0] legacy_user_in=SERIAL_MODE==0 ? USER_IN : 7'h7f;
+generate if(SERIAL_MODE==0) begin: original_user_port
+ assign USER_OUT=user_port_mode ? IndirectUserOutFlop : IndirectUserOutmt32;
+ assign SERIAL_JOY0=JOY0; assign SERIAL_JOY1=JOY1; assign serial_osd=0;
+end else begin: controller_user_port
+ amiga_serial #(.MODE(SERIAL_MODE)) inputs(
+  .clk50(CLK_50M),.clk_sys(clk_sys),.reset(reset),.vblank(vblank),
+  .osd_active(OSD_STATUS),.user_in(USER_IN),.user_out(serial_out),
+  .usb1(JOY0),.usb2(JOY1),.joy1(SERIAL_JOY0),.joy2(SERIAL_JOY1),.osd_request(serial_osd));
+ assign USER_OUT=serial_out;
+end endgenerate
 
 
 minimig minimig
@@ -858,8 +873,8 @@ minimig minimig
 	.ri           (1                ), // RS232 Ring Indicator
 
 	//I/O
-	._joy1        (~JOY0            ), // joystick 1 [fire4,fire3,fire2,fire,up,down,left,right] (default mouse port)
-	._joy2        (~JOY1            ), // joystick 2 [fire4,fire3,fire2,fire,up,down,left,right] (default joystick port)
+	._joy1        (~SERIAL_JOY0     ), // joystick 1 [fire4,fire3,fire2,fire,up,down,left,right] (default mouse port)
+	._joy2        (~SERIAL_JOY1     ), // joystick 2 [fire4,fire3,fire2,fire,up,down,left,right] (default joystick port)
 	._joy3        (~JOY2            ), // joystick 1 [fire4,fire3,fire2,fire,up,down,left,right]
 	._joy4        (~JOY3            ), // joystick 2 [fire4,fire3,fire2,fire,up,down,left,right]
 	.joya1        (JOYA0            ),
@@ -975,8 +990,9 @@ minimig minimig
 	.a2065_mem_write(a2065_mem_write),
 	.a2065_mem_waitrequest(a2065_mem_waitrequest),
 	
-	.USER_IN      			(USER_IN),
+	.USER_IN      			(legacy_user_in),
 	.USER_OUT     			(IndirectUserOutFlop),
+	.user_controllers(SERIAL_MODE!=0),
 	.user_port_mode 		(user_port_mode),
 	.mister_floppy_status	(mister_floppy_status),
 	.drive_snd    			(drive_snd)
@@ -1252,7 +1268,7 @@ end
 ////////////////////////////  MT32pi  ////////////////////////////////// 
 
 reg   userport_change_reset;
-wire        mt32_reset    = status[32] | reset | userport_change_reset;
+wire        mt32_reset    = (SERIAL_MODE!=0) | status[32] | reset | userport_change_reset;
 wire        mt32_disable  = status[33];
 wire        mt32_mode_req = status[34];
 wire  [1:0] mt32_rom_req  = status[36:35];
@@ -1273,7 +1289,7 @@ wire mt32_mute = mt32_available &  mt32_disable;
 mt32pi mt32pi
 (
 	.*,
-	.USER_IN(USER_IN),
+	.USER_IN(legacy_user_in),
 	.USER_OUT(IndirectUserOutmt32),
 
 	.CE_PIXEL(ce_pix_mt32),
