@@ -1,0 +1,139 @@
+name: Experimental Amiga LLAPI and SNAC variants
+on:
+  push:
+    branches: [llapi-snac-experimental]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: amiga-controllers-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        name: Import verified experimental source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = llapi-snac-experimental
+          if test -f source-import.json; then
+            python3 - <<'PY'
+          import hashlib,json,re
+          from pathlib import Path
+          m=json.loads(Path('source-import.json').read_text())
+          assert re.fullmatch('[0-9a-f]{40}',m['commit'])
+          assert re.fullmatch('[0-9a-f]{40}',m['tree'])
+          assert re.fullmatch('[0-9a-f]{64}',m['sha256'])
+          assert hashlib.sha256(Path('amiga-integration.bundle').read_bytes()).hexdigest()==m['sha256']
+          Path('/tmp/source-id').write_text(m['commit']+'\n'+m['tree']+'\n')
+          PY
+            mapfile -t expected < /tmp/source-id
+            git bundle verify amiga-integration.bundle
+            git fetch ./amiga-integration.bundle refs/heads/llapi-snac-experimental
+            test "$(git rev-parse FETCH_HEAD)" = "${expected[0]}"
+            test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "${expected[1]}"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            imported=$(printf '%s\n' 'Import Amiga LLAPI/SNAC integration with upstream history preserved' | git commit-tree "${expected[1]}" -p "$GITHUB_SHA" -p "${expected[0]}")
+            git push origin "$imported:refs/heads/$GITHUB_REF_NAME"
+            echo "sha=$imported" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+  controllers:
+    needs: source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y iverilog
+      - run: bash tests/controllers/run.sh
+  build:
+    needs: [source,controllers]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - {mode: 0, name: Original-USER}
+          - {mode: 1, name: LLAPI-2P}
+          - {mode: 2, name: SNAC-DB15-2P}
+          - {mode: 3, name: SNAC-SNES-2P}
+          - {mode: 4, name: SNAC-DB9-1P}
+          - {mode: 5, name: SNAC-NES-2P}
+          - {mode: 6, name: SNAC-SATURN-1P}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - name: Compile with Quartus 17.0 and enforce timing
+        env:
+          MODE: ${{ matrix.mode }}
+          VARIANT: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$GITHUB_WORKSPACE:/build" -w /build ghcr.io/raetro/quartus:17.0 bash tests/controllers/build.sh "$MODE" "$VARIANT"
+      - name: Upload accepted RBF and reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Amiga-${{ matrix.name }}-${{ github.run_number }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            test-build/
+            output_files/*.rpt
+            output_files/*.summary
+            output_files/timing-acceptance.json
+  prerelease:
+    needs: [source,controllers,build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: Amiga-*
+          path: artifacts
+      - name: Publish experimental bundle only after all seven variants pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          python3 - <<'PY'
+          import json,shutil
+          from pathlib import Path
+          paths=list(Path('artifacts').glob('*/test-build/*.rbf'))
+          assert len(paths)==7, f'Expected 7 accepted RBFs, found {len(paths)}'
+          for p in paths:
+              d=json.loads((p.parent/'timing-acceptance.json').read_text())
+              assert d['accepted'] and all(v>=0 for v in d['worst_slack_ns'].values())
+              shutil.copy2(p,Path('release')/p.name)
+              shutil.copy2(p.parent/'timing-acceptance.json',Path('release')/(p.stem+'-timing.json'))
+          PY
+          cp CONTROLLERS-EXPERIMENTAL.md release/
+          printf 'Compiled source: %s\nOfficial source: bf5d061b414fa0c8cd56f0e6941c586202ebfbaa\n' "$SOURCE_SHA" > release/SOURCE.txt
+          (cd release && sha256sum *.rbf > SHA256SUMS)
+          (cd release && zip -q ../Amiga-LLAPI-SNAC-experimental.zip *)
+          tag="amiga-llapi-snac-20261029-run${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --prerelease --title 'Amiga LLAPI / SNAC — experimental separate RBF variants' --notes-file CONTROLLERS-EXPERIMENTAL.md Amiga-LLAPI-SNAC-experimental.zip release/*.rbf release/SHA256SUMS release/SOURCE.txt release/*-timing.json

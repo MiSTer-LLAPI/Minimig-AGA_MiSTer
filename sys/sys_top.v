@@ -1,3 +1,4 @@
+`include "rtl/controllers/mode.vh"
 //============================================================================
 //
 //  MiSTer hardware abstraction module
@@ -1658,8 +1659,16 @@ audio_out audio_out
 
 ////////////////  User I/O (USB 3.0 connector) /////////////////////////
 
-assign USER_IO[0] =                       !user_out[0]  ? 1'b0 : 1'bZ;
-assign USER_IO[1] =                       !user_out[1]  ? 1'b0 : 1'bZ;
+generate if(`AMIGA_SERIAL_MODE==2) begin: original_db15_drive
+ // Jotego's DB15 splitter requires push-pull load/clock, not open drain.
+ reg [12:0] settle=7500;
+ always @(posedge FPGA_CLK2_50) if(settle!=0) settle<=settle-1'b1;
+ assign USER_IO[0]=settle!=0 ? 1'bZ : user_out[0];
+ assign USER_IO[1]=settle!=0 ? 1'bZ : user_out[1];
+end else begin: standard_user_drive
+ assign USER_IO[0]=!user_out[0] ? 1'b0 : 1'bZ;
+ assign USER_IO[1]=!user_out[1] ? 1'b0 : 1'bZ;
+end endgenerate
 assign USER_IO[2] = !(SW[1] ? HDMI_I2S   : user_out[2]) ? 1'b0 : 1'bZ;
 assign USER_IO[3] =                       !user_out[3]  ? 1'b0 : 1'bZ;
 assign USER_IO[4] = !(SW[1] ? HDMI_SCLK  : user_out[4]) ? 1'b0 : 1'bZ;

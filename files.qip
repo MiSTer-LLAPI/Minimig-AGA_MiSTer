@@ -31,3 +31,7 @@ set_global_assignment -name VERILOG_FILE rtl/drive_sounds.v
 set_global_assignment -name VERILOG_FILE hps_ext.v
 set_global_assignment -name SYSTEMVERILOG_FILE Minimig.sv
 set_global_assignment -name SDC_FILE Minimig.sdc
+
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/controllers/amiga_serial.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/controllers/llapi.sv
+set_global_assignment -name VERILOG_FILE rtl/controllers/joydb15.v
