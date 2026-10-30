@@ -1,4 +1,4 @@
-name: Build official Main with Amiga 68030 menus
+name: Build official Main 68030 for internal testing
 on:
   push:
     branches: [MiSTer]
@@ -8,10 +8,12 @@ permissions:
   contents: read
 concurrency:
   group: main-68030-official-snapshot
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -53,6 +55,7 @@ jobs:
 
           Independently compiled from unmodified official Main_MiSTer source
           08271656799ede50358de1248f6ee878dd7ce5c4 (29 October 2026).
+          INTERNAL TEST ONLY. Do not publish this draft or distribute via Update All.
           This is a test build, not a new official MiSTer release.
           It exposes the current Amiga 68030 / 68EC030 CPU selection and is
           compatible in source with the Amiga LLAPI RBF dated 20261029.
@@ -74,28 +77,10 @@ jobs:
           DOC
           (cd package && sha256sum MiSTer > SHA256SUMS)
           tar -czf MiSTer-Main-68030-20261030-test.tar.gz -C package .
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: MiSTer-Main-68030-20261030-test
-          path: |
-            package/
-            MiSTer-Main-68030-20261030-test.tar.gz
-          if-no-files-found: error
-          retention-days: 30
-  publish:
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: MiSTer-Main-68030-20261030-test
-          path: built
-      - name: Publish compiled Main for testing
+      - name: Save internal draft only (never publish)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          (cd built/package && sha256sum -c SHA256SUMS)
-          gh release create main-68030-20261030-test --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'MiSTer Main — Amiga 68030 menu test build' --notes-file built/package/README.txt built/package/MiSTer built/MiSTer-Main-68030-20261030-test.tar.gz built/package/SHA256SUMS built/package/SOURCE.txt built/package/LICENSE
+          (cd package && sha256sum -c SHA256SUMS)
+          gh release create main-68030-20261030-internal --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title 'INTERNAL TEST ONLY — Main Amiga 68030' --notes-file package/README.txt package/MiSTer MiSTer-Main-68030-20261030-test.tar.gz package/SHA256SUMS package/SOURCE.txt package/LICENSE
