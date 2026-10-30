@@ -1,0 +1,101 @@
+name: Build official Main with Amiga 68030 menus
+on:
+  push:
+    branches: [MiSTer]
+    paths: [.github/workflows/build-main-68030.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: main-68030-official-snapshot
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: MiSTer-devel/Main_MiSTer
+          ref: 08271656799ede50358de1248f6ee878dd7ce5c4
+          persist-credentials: false
+      - name: Fetch official ARM GCC 10.2 toolchain
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://developer.arm.com/-/media/Files/downloads/gnu-a/10.2-2020.11/binrel/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz' -o /tmp/arm-gcc.tar.xz
+          mkdir /tmp/arm-gcc
+          tar -xJf /tmp/arm-gcc.tar.xz -C /tmp/arm-gcc --strip-components=1
+          echo '/tmp/arm-gcc/bin' >> "$GITHUB_PATH"
+          sha256sum /tmp/arm-gcc.tar.xz
+      - name: Compile unmodified official Main and verify ARM binary
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 08271656799ede50358de1248f6ee878dd7ce5c4
+          grep -q '68EC030' menu.cpp
+          grep -q '68030' menu.cpp
+          arm-none-linux-gnueabihf-gcc --version
+          make -j2
+          test -s bin/MiSTer
+          arm-none-linux-gnueabihf-readelf -h bin/MiSTer | tee /tmp/elf-header.txt
+          grep -q 'Machine:.*ARM' /tmp/elf-header.txt
+          grep -q 'Class:.*ELF32' /tmp/elf-header.txt
+          arm-none-linux-gnueabihf-readelf -A bin/MiSTer | tee /tmp/elf-attributes.txt
+          arm-none-linux-gnueabihf-readelf -l bin/MiSTer | tee /tmp/elf-programs.txt
+          arm-none-linux-gnueabihf-strings bin/MiSTer | grep '68EC030'
+          arm-none-linux-gnueabihf-strings bin/MiSTer | grep '68030'
+          mkdir package
+          cp bin/MiSTer package/MiSTer
+          cp LICENSE package/LICENSE
+          cp /tmp/elf-header.txt /tmp/elf-attributes.txt /tmp/elf-programs.txt package/
+          printf 'Official source: https://github.com/MiSTer-devel/Main_MiSTer/commit/%s\nBuilt without source modifications. GCC 10.2-2020.11, official ARM toolchain.\n' "$(git rev-parse HEAD)" > package/SOURCE.txt
+          cat > package/README.txt <<'DOC'
+          MiSTer Main — official source snapshot, Amiga 68030 menus
+
+          Independently compiled from unmodified official Main_MiSTer source
+          08271656799ede50358de1248f6ee878dd7ce5c4 (29 October 2026).
+          This is a test build, not a new official MiSTer release.
+          It exposes the current Amiga 68030 / 68EC030 CPU selection and is
+          compatible in source with the Amiga LLAPI RBF dated 20261029.
+          The existing RBF already implements the CPU. No separate RBF update
+          is included. 68030 has MMU, no FPU; 40MHz, 50MHz and Fast modes.
+
+          Install: back up the current file named MiSTer from the root of the
+          SD card. Copy the supplied MiSTer file to that same root, replacing
+          the file, then reboot. Do not put it in the cores directory or
+          rename it to .rbf. To revert, restore the saved MiSTer file and reboot.
+          Update All may replace a manually installed test Main with the
+          official distributed version on its next run.
+
+          Keep the current Amiga LLAPI RBF. This Main preserves the official
+          menus: USER MT32-pi/floppy items remain visible, but those physical
+          functions are disabled in the LLAPI-only RBF. ADF/HDF remain available.
+          Compilation and ARM ELF verification do not establish hardware testing.
+          Original MiSTer authorship and license are preserved in LICENSE.
+          DOC
+          (cd package && sha256sum MiSTer > SHA256SUMS)
+          tar -czf MiSTer-Main-68030-20261030-test.tar.gz -C package .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: MiSTer-Main-68030-20261030-test
+          path: |
+            package/
+            MiSTer-Main-68030-20261030-test.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: MiSTer-Main-68030-20261030-test
+          path: built
+      - name: Publish compiled Main for testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          (cd built/package && sha256sum -c SHA256SUMS)
+          gh release create main-68030-20261030-test --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'MiSTer Main — Amiga 68030 menu test build' --notes-file built/package/README.txt built/package/MiSTer built/MiSTer-Main-68030-20261030-test.tar.gz built/package/SHA256SUMS built/package/SOURCE.txt built/package/LICENSE
